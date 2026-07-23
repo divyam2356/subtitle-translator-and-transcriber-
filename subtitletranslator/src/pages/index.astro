@@ -486,6 +486,11 @@ function showError(msg: string) {
 
 // ── WAV → Float32 ─────────────────────────────────────────────────────────────
 function wavToFloat32(wav: Uint8Array): Float32Array {
+  if (wav.length < 44) throw new Error('WAV data too short — FFmpeg likely failed to extract audio');
+  
+  const riff = String.fromCharCode(wav[0], wav[1], wav[2], wav[3]);
+  if (riff !== 'RIFF') throw new Error('Invalid WAV file — missing RIFF header');
+  
   let offset = 12;
   while (offset < wav.length - 8) {
     const id = String.fromCharCode(wav[offset], wav[offset+1], wav[offset+2], wav[offset+3]);
@@ -495,12 +500,21 @@ function wavToFloat32(wav: Uint8Array): Float32Array {
   }
   const bytesPerSample = 2;
   const numSamples = Math.floor((wav.length - offset) / bytesPerSample);
+  if (numSamples === 0) throw new Error('WAV file has no audio samples');
+  
   const float32 = new Float32Array(numSamples);
   const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
   for (let i = 0; i < numSamples; i++) {
     const int16 = view.getInt16(offset + i * 2, true); // little-endian
     float32[i] = int16 / 32768.0;
   }
+  
+  // Check if audio is silent
+  let sum = 0;
+  const checkLen = Math.min(float32.length, 16000);
+  for (let i = 0; i < checkLen; i++) sum += Math.abs(float32[i]);
+  if (sum / checkLen < 0.001) throw new Error('Audio appears to be silent — no audible content detected');
+  
   return float32;
 }
 
@@ -540,11 +554,28 @@ async function extractAudio(file: File): Promise<Float32Array> {
   setProgress('ffmpeg', 20, 'Writing file…');
   await ffmpegInstance.writeFile('input.video', await fetchFile(file));
   await new Promise(r => setTimeout(r, 0));
-  await ffmpegInstance.exec(['-i','input.video','-vn','-ar','16000','-ac','1','-f','wav','audio.wav']);
+  
+  // Try primary extraction command
+  try {
+    await ffmpegInstance.exec(['-i','input.video','-vn','-ar','16000','-ac','1','-f','wav','audio.wav']);
+  } catch (e) {
+    console.warn('Primary FFmpeg command failed, trying fallback:', e);
+    // Fallback: force all streams, different codec handling
+    try {
+      await ffmpegInstance.exec(['-i','input.video','-vn','-ar','16000','-ac','1','-acodec','pcm_s16le','-f','wav','audio.wav']);
+    } catch (e2) {
+      await ffmpegInstance.deleteFile('input.video').catch(() => {});
+      throw new Error(`Failed to extract audio from this file. The video may have an unsupported audio codec. Try converting it to MP3 or WAV first.`);
+    }
+  }
+  
   const wav = await ffmpegInstance.readFile('audio.wav') as Uint8Array;
   await ffmpegInstance.deleteFile('input.video');
   await ffmpegInstance.deleteFile('audio.wav');
   setProgress('ffmpeg', 100, 'Audio extracted.');
+  
+  if (wav.length < 44) throw new Error('FFmpeg produced empty audio file — the video may not contain an audio track');
+  
   return wavToFloat32(wav);
 }
 
