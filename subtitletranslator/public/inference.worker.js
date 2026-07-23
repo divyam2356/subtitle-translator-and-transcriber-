@@ -305,51 +305,57 @@ function splitByPunctuation(segments) {
   return out;
 }
 
-async function transcribe(pcmFloat32, model, sourceLang, targetLang, device) {
-  log(`Loading Whisper model: ${model}`);
-  post('progress', { stage: 'whisper', pct: 0, message: `Loading ${model}…` });
+async function loadWhisperModel(model, device) {
+  log(`Loading Whisper model: ${model} on ${device}`);
 
-  // Fix OOM crashes for large models: fp32 requires >3.2GB RAM.
-  // Use mixed precision on WebGPU: fp16 encoder (maintains accuracy), q4 decoder (drastically reduces memory).
-  const dtype = device === 'webgpu' 
-    ? { encoder_model: 'fp16', decoder_model_merged: 'q4' } 
-    : 'q8';
-
-  log(`Initializing pipeline with device: "${device}" and dtype: ${JSON.stringify(dtype)}`);
-
-  let asr;
-  try {
-    asr = await pipeline('automatic-speech-recognition', model, {
-      device,
-      dtype,
-      progress_callback: ({ status, progress }) => {
-        if (status === 'downloading') {
-          const p = Math.round(progress ?? 0);
-          log(`Downloading Whisper model: ${p}%`);
-          post('progress', { stage: 'whisper', pct: p, message: `Downloading Whisper model… ${p}%` });
-        }
-      },
-    });
-  } catch (modelErr) {
-    log(`Failed to load model on ${device}: ${modelErr.message}`);
-    // If WebGPU fails, try falling back to WASM
-    if (device === 'webgpu') {
-      log('WebGPU model load failed — retrying with WASM/CPU…');
-      post('progress', { stage: 'whisper', pct: 0, message: 'GPU failed, falling back to CPU…' });
-      asr = await pipeline('automatic-speech-recognition', model, {
-        device: 'wasm',
-        dtype: 'q8',
-        progress_callback: ({ status, progress }) => {
-          if (status === 'downloading') {
-            const p = Math.round(progress ?? 0);
-            post('progress', { stage: 'whisper', pct: p, message: `Downloading Whisper model… ${p}%` });
-          }
-        },
-      });
-    } else {
-      throw modelErr;
+  // Try WebGPU with simple fp32 dtype first — complex mixed precision objects can hang
+  if (device === 'webgpu') {
+    for (const dtype of ['fp32', 'fp16', 'q8']) {
+      try {
+        log(`Trying WebGPU with dtype: ${dtype}`);
+        post('progress', { stage: 'whisper', pct: 0, message: `Loading model (${dtype} on GPU)…` });
+        const asr = await pipeline('automatic-speech-recognition', model, {
+          device: 'webgpu',
+          dtype,
+          progress_callback: ({ status, progress }) => {
+            if (status === 'downloading') {
+              const p = Math.round(progress ?? 0);
+              log(`Downloading Whisper model: ${p}%`);
+              post('progress', { stage: 'whisper', pct: p, message: `Downloading Whisper model… ${p}%` });
+            }
+          },
+        });
+        log(`WebGPU loaded successfully with dtype: ${dtype}`);
+        return asr;
+      } catch (e) {
+        log(`WebGPU dtype ${dtype} failed: ${e.message}`);
+      }
     }
+    // All WebGPU attempts failed — fall through to WASM
+    log('All WebGPU attempts failed — falling back to WASM/CPU');
   }
+
+  // WASM/CPU fallback
+  const dtype = 'q8';
+  log(`Loading model on WASM with dtype: ${dtype}`);
+  post('progress', { stage: 'whisper', pct: 0, message: 'Loading model on CPU…' });
+  const asr = await pipeline('automatic-speech-recognition', model, {
+    device: 'wasm',
+    dtype,
+    progress_callback: ({ status, progress }) => {
+      if (status === 'downloading') {
+        const p = Math.round(progress ?? 0);
+        log(`Downloading Whisper model: ${p}%`);
+        post('progress', { stage: 'whisper', pct: p, message: `Downloading Whisper model… ${p}%` });
+      }
+    },
+  });
+  log('WASM model loaded successfully');
+  return asr;
+}
+
+async function transcribe(pcmFloat32, model, sourceLang, targetLang, device) {
+  const asr = await loadWhisperModel(model, device);
 
   log('Whisper model loaded. Starting transcription…');
   post('progress', { stage: 'whisper', pct: 5, message: 'Starting transcription…' });
