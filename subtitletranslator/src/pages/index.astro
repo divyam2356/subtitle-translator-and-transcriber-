@@ -552,6 +552,7 @@ async function extractAudio(file: File): Promise<Float32Array> {
     await new Promise(r => setTimeout(r, 0));
   }
   setProgress('ffmpeg', 20, 'Writing file…');
+  console.log(`[ffmpeg] Input file: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB), type: ${file.type}`);
   await ffmpegInstance.writeFile('input.video', await fetchFile(file));
   await new Promise(r => setTimeout(r, 0));
   
@@ -574,6 +575,7 @@ async function extractAudio(file: File): Promise<Float32Array> {
   await ffmpegInstance.deleteFile('audio.wav');
   setProgress('ffmpeg', 100, 'Audio extracted.');
   
+  console.log(`[ffmpeg] WAV output: ${wav.length} bytes, first 12 bytes: ${Array.from(wav.slice(0, 12)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
   if (wav.length < 44) throw new Error('FFmpeg produced empty audio file — the video may not contain an audio track');
   
   return wavToFloat32(wav);
@@ -807,6 +809,7 @@ runBtn.addEventListener('click', async () => {
     }
 
     const pcm = await extractAudio(selectedFile);
+    console.log(`[main] Audio extracted: ${pcm.length} samples (${(pcm.length / 16000).toFixed(1)}s), buffer byteLength: ${pcm.buffer.byteLength}`);
     getWorker().postMessage({
       pcm: pcm.buffer,
       whisperModel: whisperSel.value,

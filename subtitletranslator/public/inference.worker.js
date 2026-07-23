@@ -576,7 +576,7 @@ self.onmessage = async ({ data }) => {
 
     const { pcm, whisperModel, replacements, translatorConfig, skipTranslation, sourceLang, targetLang, device } = data;
     const float32 = new Float32Array(pcm);
-    log(`Received PCM: ${float32.length} samples (${(float32.length / SAMPLE_RATE).toFixed(1)}s)`);
+    log(`Received PCM buffer: byteLength=${pcm.byteLength}, float32 length=${float32.length} samples (${(float32.length / SAMPLE_RATE).toFixed(1)}s)`);
     log(`Source language: ${sourceLang || 'auto-detect'}, Target language: ${targetLang || 'none'}`);
 
     // whisper-small and whisper-large are capable of built-in translate;
