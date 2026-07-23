@@ -1,0 +1,826 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const WHISPER_MODELS = [
+  { id: 'onnx-community/whisper-tiny',  label: 'Tiny (~40 MB) — fastest' },
+  { id: 'onnx-community/whisper-base',  label: 'Base (~150 MB) — balanced' },
+  { id: 'onnx-community/whisper-small', label: 'Small (~250 MB) — accurate' },
+  { id: 'onnx-community/whisper-large-v3-turbo', label: 'Large v3 Turbo (~800 MB) — highly accurate (GPU recommended)' },
+];
+
+const LANGUAGES = [
+  { code: 'none', label: 'No translation' },
+  { code: 'en',   label: 'English' },
+  { code: 'fr',   label: 'French' },
+  { code: 'de',   label: 'German' },
+  { code: 'es',   label: 'Spanish' },
+  { code: 'it',   label: 'Italian' },
+  { code: 'nl',   label: 'Dutch' },
+  { code: 'ru',   label: 'Russian' },
+  { code: 'zh',   label: 'Chinese' },
+  { code: 'ar',   label: 'Arabic' },
+  { code: 'hi',   label: 'Hindi' },
+  { code: 'ja',   label: 'Japanese' },
+  { code: 'pt',   label: 'Portuguese' },
+  { code: 'pl',   label: 'Polish' },
+  { code: 'tr',   label: 'Turkish' },
+  { code: 'ko',   label: 'Korean' },
+  { code: 'th',   label: 'Thai' },
+  { code: 'vi',   label: 'Vietnamese' },
+  { code: 'id',   label: 'Indonesian' },
+  { code: 'uk',   label: 'Ukrainian' },
+  { code: 'cs',   label: 'Czech' },
+  { code: 'sv',   label: 'Swedish' },
+  { code: 'da',   label: 'Danish' },
+  { code: 'fi',   label: 'Finnish' },
+  { code: 'el',   label: 'Greek' },
+  { code: 'ro',   label: 'Romanian' },
+  { code: 'hu',   label: 'Hungarian' },
+  { code: 'no',   label: 'Norwegian' },
+  { code: 'bn',   label: 'Bengali' },
+  { code: 'ta',   label: 'Tamil' },
+  { code: 'te',   label: 'Telugu' },
+  { code: 'ml',   label: 'Malayalam' },
+  { code: 'sw',   label: 'Swahili' },
+  { code: 'he',   label: 'Hebrew' },
+  { code: 'fa',   label: 'Persian' },
+  { code: 'ur',   label: 'Urdu' },
+];
+
+const TRANSLATORS = [
+  { id: 'm2m100', label: 'M2M100 418M (Recommended)', model: 'Xenova/m2m100_418M', desc: '100 languages, ~240MB, highly accurate, WebGPU/CPU' },
+  { id: 'nllb',   label: 'NLLB-200 Distilled (High VRAM)', model: 'Xenova/nllb-200-distilled-600M', desc: '200+ languages, ~889MB. Warning: Needs 1.5GB+ VRAM or it may crash.' },
+  { id: 'opusmt', label: 'OPUS-MT', model: 'opus-mt', desc: 'Pair-specific models, lightweight, CPU-only' },
+];
+
+// NLLB-200 FLORES-200 language code mapping (ISO 639-1 → FLORES-200)
+const NLLB_LANG_MAP: Record<string, string> = {
+  en: 'eng_Latn', fr: 'fra_Latn', de: 'deu_Latn', es: 'spa_Latn',
+  it: 'ita_Latn', nl: 'nld_Latn', ru: 'rus_Cyrl', zh: 'zho_Hans',
+  ar: 'arb_Arab', hi: 'hin_Deva', ja: 'jpn_Jpan', pt: 'por_Latn',
+  pl: 'pol_Latn', tr: 'tur_Latn', ko: 'kor_Hang', th: 'tha_Thai',
+  vi: 'vie_Latn', id: 'ind_Latn', uk: 'ukr_Cyrl', cs: 'ces_Latn',
+  sv: 'swe_Latn', da: 'dan_Latn', fi: 'fin_Latn', el: 'ell_Grek',
+  ro: 'ron_Latn', hu: 'hun_Latn', no: 'nob_Latn', bn: 'ben_Beng',
+  ta: 'tam_Taml', te: 'tel_Telu', ml: 'mal_Mlym', sw: 'swh_Latn',
+  he: 'heb_Hebr', fa: 'fas_Arab', ur: 'urd_Arab',
+};
+---
+
+<Layout>
+  <header class="border-b border-border px-6 py-4 flex items-center gap-3">
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" class="shrink-0">
+      <rect width="28" height="28" rx="7" fill="#149414"/>
+      <path d="M7 10h14M7 14h10M7 18h6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <span class="font-semibold text-lg tracking-tight">SubtitleAI</span>
+    <span class="ml-auto text-xs text-muted">100% local · no server · no API key</span>
+  </header>
+
+  <main class="max-w-2xl mx-auto px-4 py-10 space-y-6">
+
+    <!-- Drop zone -->
+    <div id="dropzone"
+      class="border-2 border-dashed border-border rounded-[var(--radius-card)] p-10 text-center cursor-pointer transition-colors hover:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      tabindex="0" role="button" aria-label="Drop video file or click to browse">
+      <svg class="mx-auto mb-3 text-muted" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12M8 8l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p class="text-text font-medium">Drop a video here</p>
+      <p class="text-muted text-sm mt-1">or <span class="text-accent underline">click to browse</span></p>
+      <p id="filename" class="mt-3 text-sm text-success hidden"></p>
+      <input id="fileinput" type="file" accept="video/*,audio/*" class="hidden" />
+    </div>
+
+    <!-- Options -->
+    <div class="space-y-4">
+      <div id="local-settings" class="space-y-1">
+        <label class="text-sm text-muted" for="whisper-select">Local Whisper model</label>
+        <select id="whisper-select" class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent">
+          {WHISPER_MODELS.map((m) => <option value={m.id}>{m.label}</option>)}
+        </select>
+      </div>
+
+      <div class="space-y-1">
+        <label class="text-sm text-muted" for="word-replacements">Word Corrections (optional)</label>
+        <textarea id="word-replacements" rows="2" placeholder="coming → cumming, hold me → fuck me" class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent resize-y"></textarea>
+        <p class="text-[10px] text-muted/60 mt-1">Fix consistently mistranscribed words. Use arrow (→ or ->) to separate each pair, comma between pairs.</p>
+      </div>
+
+      <!-- Compute device -->
+      <div class="flex items-center justify-between bg-surface border border-border rounded-[var(--radius-card)] px-4 py-3">
+        <div>
+          <label class="text-sm text-muted">Compute device</label>
+          <p id="gpu-status" class="text-xs text-muted/60">Detecting…</p>
+        </div>
+        <div class="flex bg-bg border border-border rounded-lg overflow-hidden">
+          <button id="btn-cpu" class="px-3 py-1.5 text-xs font-medium transition-colors bg-accent text-white" data-device="wasm">CPU</button>
+          <button id="btn-gpu" class="px-3 py-1.5 text-xs font-medium transition-colors text-muted hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed" data-device="webgpu">GPU</button>
+          <button id="btn-cloud" class="px-3 py-1.5 text-xs font-medium transition-colors text-muted hover:bg-surface border-l border-border" data-device="cloud">Cloud API</button>
+        </div>
+      </div>
+
+      <!-- Cloud API Settings (Hidden by default) -->
+      <div id="cloud-settings" class="hidden space-y-4 bg-surface border border-border rounded-[var(--radius-card)] p-4">
+        <div class="space-y-1">
+          <label class="text-sm text-muted">API Base URL</label>
+          <input id="cloud-url" type="text" placeholder="e.g. https://api.groq.com/openai/v1" class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent" />
+          <p class="text-[10px] text-muted/60 mt-1">Must be an OpenAI-compatible endpoint (e.g. your Colab URL, Groq, etc.)</p>
+        </div>
+        <div class="space-y-1">
+          <label class="text-sm text-muted">API Key</label>
+          <div class="flex gap-2 items-center">
+            <input id="cloud-key" type="password" placeholder="sk-..." class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent" />
+            <label class="flex items-center gap-1.5 text-xs text-muted cursor-pointer shrink-0">
+              <input id="cloud-save-key" type="checkbox" class="rounded border-border bg-bg text-accent focus:ring-accent" />
+              Save Token
+            </label>
+          </div>
+        </div>
+        <div class="space-y-1">
+          <label class="text-sm text-muted">Model Name</label>
+          <input id="cloud-model" type="text" value="whisper-large-v3" class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent" />
+        </div>
+        <div class="pt-2 border-t border-border flex items-center justify-between">
+          <button id="btn-verify-cloud" class="text-xs bg-surface border border-border px-3 py-1.5 rounded-md hover:bg-bg transition-colors text-text font-medium">Verify Connection</button>
+          <span id="cloud-verify-status" class="text-xs text-muted"></span>
+        </div>
+      </div>
+
+      <div class="bg-surface border border-border rounded-[var(--radius-card)] px-4 py-3 space-y-3">
+        <div class="flex items-baseline justify-between">
+          <p class="text-sm text-muted">Translation</p>
+          <p class="text-[10px] text-muted/60">Runs locally on your device</p>
+        </div>
+        <div class="space-y-1">
+          <label class="text-xs text-muted" for="translator-select">Translator model</label>
+          <select id="translator-select" class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent">
+            {TRANSLATORS.map((t) => <option value={t.id}>{t.label}</option>)}
+          </select>
+          <p id="translator-desc" class="text-[10px] text-muted/60"></p>
+        </div>
+        <div class="flex items-end gap-3">
+          <div class="flex-1 space-y-1">
+            <label class="text-xs text-muted" for="lang-from">From</label>
+            <select id="lang-from" class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent">
+              {LANGUAGES.map((l) => <option value={l.code}>{l.label}</option>)}
+            </select>
+          </div>
+          <div class="pb-2 text-muted shrink-0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="flex-1 space-y-1">
+            <label class="text-xs text-muted" for="lang-to">To</label>
+            <select id="lang-to" class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent">
+              {LANGUAGES.filter(l => l.code !== 'none').map((l) => <option value={l.code}>{l.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <p id="model-preview" class="text-xs text-muted"></p>
+      </div>
+    </div>
+
+    <button id="run-btn" disabled
+      class="w-full py-3 rounded-lg font-semibold text-sm transition-colors bg-accent text-white hover:bg-accent-dim disabled:opacity-40 disabled:cursor-not-allowed">
+      Generate Subtitles
+    </button>
+
+    <div id="progress-area" class="hidden space-y-3">
+      <div class="flex justify-between text-xs text-muted">
+        <span id="stage-label">Initialising…</span>
+        <span id="pct-label">0%</span>
+      </div>
+      <div class="h-2 bg-surface rounded-full overflow-hidden border border-border">
+        <div id="progress-bar" class="h-full bg-accent rounded-full transition-all duration-200" style="width:0%"></div>
+      </div>
+      <p id="stage-message" class="text-sm text-muted"></p>
+      <div id="chunk-log" class="hidden mt-2 rounded-lg bg-surface border border-border overflow-hidden">
+        <div class="px-3 py-1.5 border-b border-border flex items-center justify-between">
+          <span class="text-xs font-medium text-muted">Live Transcription Log</span>
+          <span id="chunk-counter" class="text-xs text-accent font-mono"></span>
+        </div>
+        <div id="chunk-entries" class="px-3 py-2 max-h-40 overflow-y-auto space-y-1 text-xs font-mono text-muted scroll-smooth"></div>
+      </div>
+    </div>
+
+    <div id="error-banner" class="hidden rounded-lg bg-danger/10 border border-danger/30 px-4 py-3 text-sm text-danger"></div>
+
+    <div id="result-card" class="hidden bg-surface border border-border rounded-[var(--radius-card)] overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+        <span class="text-sm font-medium">Generated SRT</span>
+        <div class="flex gap-2">
+          <button id="copy-btn" class="text-xs text-accent hover:text-accent-dim transition-colors">Copy</button>
+          <button id="download-raw-btn" class="text-xs text-accent hover:text-accent-dim transition-colors">Download Raw Transcription</button>
+          <button id="download-btn" class="text-xs bg-accent text-white px-3 py-1 rounded-md hover:bg-accent-dim transition-colors">Download .srt</button>
+        </div>
+      </div>
+      <pre id="srt-preview" class="px-4 py-3 text-xs text-muted overflow-auto max-h-64 whitespace-pre-wrap"></pre>
+    </div>
+
+  </main>
+</Layout>
+
+<script>
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { toBlobURL, fetchFile } from '@ffmpeg/util';
+
+const dropzone     = document.getElementById('dropzone')!;
+const fileinput    = document.getElementById('fileinput') as HTMLInputElement;
+const filename     = document.getElementById('filename')!;
+const runBtn       = document.getElementById('run-btn') as HTMLButtonElement;
+const progressArea = document.getElementById('progress-area')!;
+const stageLabel   = document.getElementById('stage-label')!;
+const pctLabel     = document.getElementById('pct-label')!;
+const progressBar  = document.getElementById('progress-bar') as HTMLElement;
+const stageMsg     = document.getElementById('stage-message')!;
+const chunkLog     = document.getElementById('chunk-log')!;
+const chunkCounter = document.getElementById('chunk-counter')!;
+const chunkEntries = document.getElementById('chunk-entries')!;
+const errorBanner  = document.getElementById('error-banner')!;
+const resultCard   = document.getElementById('result-card')!;
+const srtPreview   = document.getElementById('srt-preview')!;
+const copyBtn      = document.getElementById('copy-btn')!;
+const downloadBtn  = document.getElementById('download-btn')!;
+const whisperSel   = document.getElementById('whisper-select') as HTMLSelectElement;
+const wordReplacementsInput = document.getElementById('word-replacements') as HTMLTextAreaElement;
+const langFrom     = document.getElementById('lang-from') as HTMLSelectElement;
+const langTo       = document.getElementById('lang-to') as HTMLSelectElement;
+const modelPreview = document.getElementById('model-preview')!;
+const translatorSel = document.getElementById('translator-select') as HTMLSelectElement;
+const translatorDesc = document.getElementById('translator-desc')!;
+
+// NLLB-200 FLORES-200 language code mapping (client-side copy)
+const NLLB_LANG_MAP: Record<string, string> = {
+  en: 'eng_Latn', fr: 'fra_Latn', de: 'deu_Latn', es: 'spa_Latn',
+  it: 'ita_Latn', nl: 'nld_Latn', ru: 'rus_Cyrl', zh: 'zho_Hans',
+  ar: 'arb_Arab', hi: 'hin_Deva', ja: 'jpn_Jpan', pt: 'por_Latn',
+  pl: 'pol_Latn', tr: 'tur_Latn', ko: 'kor_Hang', th: 'tha_Thai',
+  vi: 'vie_Latn', id: 'ind_Latn', uk: 'ukr_Cyrl', cs: 'ces_Latn',
+  sv: 'swe_Latn', da: 'dan_Latn', fi: 'fin_Latn', el: 'ell_Grek',
+  ro: 'ron_Latn', hu: 'hun_Latn', no: 'nob_Latn', bn: 'ben_Beng',
+  ta: 'tam_Taml', te: 'tel_Telu', ml: 'mal_Mlym', sw: 'swh_Latn',
+  he: 'heb_Hebr', fa: 'fas_Arab', ur: 'urd_Arab',
+};
+
+const CLIENT_TRANSLATORS = [
+  { id: 'm2m100', label: 'M2M100 418M (Recommended)', model: 'Xenova/m2m100_418M', desc: '100 languages, ~240MB, highly accurate, WebGPU/CPU' },
+  { id: 'nllb',   label: 'NLLB-200 Distilled (High VRAM)', model: 'Xenova/nllb-200-distilled-600M', desc: '200+ languages, ~889MB. Warning: Needs 1.5GB+ VRAM or it may crash.' },
+  { id: 'opusmt', label: 'OPUS-MT', model: 'opus-mt', desc: 'Pair-specific models, lightweight, CPU-only' },
+];
+
+let selectedFile: File | null = null;
+let currentSRT = '';
+let rawTranscription = ''; // Store raw transcription for debugging
+let currentDevice = 'wasm'; // default to CPU
+let workerDevice = 'wasm';  // track what device the current worker is initialized for
+let webgpuAvailable = false;
+
+const gpuStatus = document.getElementById('gpu-status')!;
+const btnCpu = document.getElementById('btn-cpu')!;
+const btnGpu = document.getElementById('btn-gpu') as HTMLButtonElement;
+const btnCloud = document.getElementById('btn-cloud')!;
+const localSettings = document.getElementById('local-settings')!;
+const cloudSettings = document.getElementById('cloud-settings')!;
+const cloudUrl = document.getElementById('cloud-url') as HTMLInputElement;
+const cloudKey = document.getElementById('cloud-key') as HTMLInputElement;
+// --- Robust Network Fetch ---
+async function fetchWithRetry(url: string, options: RequestInit, onRetry: (msg: string) => void) {
+  let attempts = 0;
+  while (true) {
+    if (!navigator.onLine) {
+      onRetry('Waiting for internet connection...');
+      await new Promise(r => window.addEventListener('online', r, { once: true }));
+    }
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok && res.status >= 500) throw new Error(`Server Error: ${res.status}`);
+      return res;
+    } catch (err: any) {
+      attempts++;
+      if (err.message && err.message.includes('Server Error') && attempts > 5) throw err;
+      onRetry(`Network issue. Retrying in 3s... (Attempt ${attempts})`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+}
+
+const cloudModel = document.getElementById('cloud-model') as HTMLInputElement;
+const cloudSaveKey = document.getElementById('cloud-save-key') as HTMLInputElement;
+const btnVerifyCloud = document.getElementById('btn-verify-cloud') as HTMLButtonElement;
+const cloudVerifyStatus = document.getElementById('cloud-verify-status')!;
+
+// Load saved cloud settings
+if (localStorage.getItem('cloudUrl')) cloudUrl.value = localStorage.getItem('cloudUrl')!;
+if (localStorage.getItem('cloudModel')) cloudModel.value = localStorage.getItem('cloudModel')!;
+if (localStorage.getItem('cloudKey')) {
+  cloudKey.value = localStorage.getItem('cloudKey')!;
+  cloudSaveKey.checked = true;
+}
+
+cloudSaveKey.addEventListener('change', () => {
+  if (!cloudSaveKey.checked) localStorage.removeItem('cloudKey');
+});
+
+async function detectWebGPU() {
+  if (!(navigator as any).gpu) {
+    gpuStatus.textContent = 'WebGPU not supported in this browser';
+    btnGpu.disabled = true;
+    return;
+  }
+  try {
+    const adapter = await (navigator as any).gpu.requestAdapter();
+    if (!adapter) {
+      gpuStatus.textContent = 'WebGPU adapter not found';
+      btnGpu.disabled = true;
+      return;
+    }
+    gpuStatus.textContent = 'WebGPU available (fp32 only)';
+    btnGpu.disabled = false;
+    webgpuAvailable = true;
+    if (currentDevice === 'wasm') updateDeviceToggle('webgpu');
+  } catch (e) {
+    gpuStatus.textContent = 'Error detecting WebGPU';
+    btnGpu.disabled = true;
+  }
+}
+detectWebGPU();
+
+function updateDeviceToggle(device: string) {
+  currentDevice = device;
+  const activeClasses = 'px-3 py-1.5 text-xs font-medium transition-colors bg-accent text-white';
+  const inactiveClasses = 'px-3 py-1.5 text-xs font-medium transition-colors text-muted hover:bg-surface';
+  
+  btnCpu.className = inactiveClasses;
+  btnGpu.className = inactiveClasses + (btnGpu.hasAttribute('disabled') ? ' disabled:opacity-50 disabled:cursor-not-allowed' : '');
+  btnCloud.className = inactiveClasses + ' border-l border-border';
+  
+  if (device === 'wasm') btnCpu.className = activeClasses;
+  else if (device === 'webgpu') btnGpu.className = activeClasses;
+  else if (device === 'cloud') btnCloud.className = activeClasses + ' border-l border-border';
+
+  // Toggle settings visibility
+  if (device === 'cloud') {
+    localSettings.classList.add('hidden');
+    cloudSettings.classList.remove('hidden');
+  } else {
+    localSettings.classList.remove('hidden');
+    cloudSettings.classList.add('hidden');
+  }
+}
+btnCpu.addEventListener('click', () => updateDeviceToggle('wasm'));
+btnGpu.addEventListener('click', () => { if (!(btnGpu as HTMLButtonElement).disabled) updateDeviceToggle('webgpu'); });
+btnCloud.addEventListener('click', () => updateDeviceToggle('cloud'));
+
+
+function getTranslatorConfig() {
+  const from = langFrom.value, to = langTo.value;
+  if (from === 'none' || from === to) return null;
+  const translatorId = translatorSel.value;
+  if (translatorId === 'm2m100') {
+    return { type: 'm2m100', model: 'Xenova/m2m100_418M', srcLang: from, tgtLang: to };
+  }
+  if (translatorId === 'nllb') {
+    const srcLang = NLLB_LANG_MAP[from];
+    const tgtLang = NLLB_LANG_MAP[to];
+    if (!srcLang || !tgtLang) return null;
+    return { type: 'nllb', model: 'Xenova/nllb-200-distilled-600M', srcLang, tgtLang };
+  }
+  // OPUS-MT fallback
+  return { type: 'opusmt', model: `Xenova/opus-mt-${from}-${to}`, srcLang: from, tgtLang: to };
+}
+function updatePreview() {
+  const cfg = getTranslatorConfig();
+  if (!cfg) {
+    modelPreview.textContent = 'No translation selected';
+  } else if (cfg.type === 'nllb') {
+    modelPreview.textContent = `Model: ${cfg.model} (${cfg.srcLang} → ${cfg.tgtLang})`;
+  } else {
+    modelPreview.textContent = `Model: ${cfg.model}`;
+  }
+  // Update translator description
+  const t = CLIENT_TRANSLATORS.find((t: any) => t.id === translatorSel.value);
+  translatorDesc.textContent = t ? t.desc : '';
+}
+langFrom.addEventListener('change', updatePreview);
+langTo.addEventListener('change', updatePreview);
+translatorSel.addEventListener('change', updatePreview);
+updatePreview();
+
+btnVerifyCloud.addEventListener('click', async () => {
+  const url = cloudUrl.value.trim().replace(/\/+$/, '');
+  const key = cloudKey.value.trim();
+  
+  if (!url) {
+    cloudVerifyStatus.textContent = 'Please enter a Base URL';
+    cloudVerifyStatus.className = 'text-xs text-danger';
+    return;
+  }
+  
+  btnVerifyCloud.disabled = true;
+  cloudVerifyStatus.textContent = 'Checking...';
+  cloudVerifyStatus.className = 'text-xs text-muted animate-pulse';
+
+  try {
+    const res = await fetch(`${url}/models`, {
+      method: 'GET',
+      headers: key ? { 'Authorization': `Bearer ${key}` } : {}
+    });
+
+    if (res.ok) {
+      cloudVerifyStatus.textContent = 'Connection successful! \u2713';
+      cloudVerifyStatus.className = 'text-xs text-success';
+      // Automatically save if checkbox is checked
+      if (cloudSaveKey.checked && key) localStorage.setItem('cloudKey', key);
+      localStorage.setItem('cloudUrl', url);
+    } else {
+      let errText = '';
+      try {
+        const errObj = await res.json();
+        errText = errObj.error?.message || res.statusText;
+      } catch (e) {
+        errText = await res.text() || res.statusText;
+      }
+      cloudVerifyStatus.textContent = `Auth failed (${res.status}): ${errText}`;
+      cloudVerifyStatus.className = 'text-xs text-danger';
+    }
+  } catch (err: any) {
+    cloudVerifyStatus.textContent = `Network error: ${err.message}`;
+    cloudVerifyStatus.className = 'text-xs text-danger';
+  } finally {
+    btnVerifyCloud.disabled = false;
+  }
+});
+
+dropzone.addEventListener('click', () => fileinput.click());
+dropzone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileinput.click(); });
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-accent'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('border-accent'));
+dropzone.addEventListener('drop', (e: DragEvent) => {
+  e.preventDefault(); dropzone.classList.remove('border-accent');
+  const f = e.dataTransfer?.files[0]; if (f) setFile(f);
+});
+fileinput.addEventListener('change', () => { if (fileinput.files?.[0]) setFile(fileinput.files[0]); });
+
+function setFile(f: File) {
+  selectedFile = f;
+  filename.textContent = `\u2713 ${f.name}`;
+  filename.classList.remove('hidden');
+  runBtn.disabled = false;
+}
+
+const STAGES: Record<string, string> = { ffmpeg: '1/3 Audio extraction', whisper: '2/3 Transcription', translate: '3/3 Translation' };
+function setProgress(stage: string, pct: number, message: string) {
+  stageLabel.textContent  = STAGES[stage] ?? stage;
+  pctLabel.textContent    = `${pct}%`;
+  progressBar.style.width = `${pct}%`;
+  stageMsg.textContent    = message;
+}
+function showError(msg: string) {
+  errorBanner.textContent = `Error: ${msg}`;
+  errorBanner.classList.remove('hidden');
+  progressArea.classList.add('hidden');
+  runBtn.disabled = false;
+}
+
+// ── WAV → Float32 ─────────────────────────────────────────────────────────────
+function wavToFloat32(wav: Uint8Array): Float32Array {
+  let offset = 12;
+  while (offset < wav.length - 8) {
+    const id = String.fromCharCode(wav[offset], wav[offset+1], wav[offset+2], wav[offset+3]);
+    const size = wav[offset+4] | (wav[offset+5] << 8) | (wav[offset+6] << 16) | (wav[offset+7] << 24);
+    if (id === 'data') { offset += 8; break; }
+    offset += 8 + size;
+  }
+  const bytesPerSample = 2;
+  const numSamples = Math.floor((wav.length - offset) / bytesPerSample);
+  const float32 = new Float32Array(numSamples);
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  for (let i = 0; i < numSamples; i++) {
+    const int16 = view.getInt16(offset + i * 2, true); // little-endian
+    float32[i] = int16 / 32768.0;
+  }
+  return float32;
+}
+
+// ── Stage 1: FFmpeg (main thread — fast) ──────────────────────────────────────
+let ffmpegInstance: FFmpeg | null = null;
+
+function toSRT(segments: any[]) {
+  return segments.map((s, i) => {
+    const fmt = (t: number) => {
+      const ms   = Math.round((t % 1) * 1000);
+      const secs = Math.floor(t % 60);
+      const mins = Math.floor((t / 60) % 60);
+      const hrs  = Math.floor(t / 3600);
+      return `${String(hrs).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')},${String(ms).padStart(3,'0')}`;
+    };
+    return `${i + 1}\n${fmt(s.start)} --> ${fmt(s.end)}\n${s.text.trim()}\n`;
+  }).join('\n');
+}
+
+async function extractAudio(file: File): Promise<Float32Array> {
+  setProgress('ffmpeg', 0, 'Loading FFmpeg…');
+  await new Promise(r => setTimeout(r, 0));
+  if (!ffmpegInstance) {
+    ffmpegInstance = new FFmpeg();
+    const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
+    const ffBase = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm';
+    ffmpegInstance.on('progress', ({ progress }: {progress:number}) =>
+      setProgress('ffmpeg', Math.round(progress * 100), 'Extracting audio…')
+    );
+    await ffmpegInstance.load({
+      coreURL:   await toBlobURL(`${base}/ffmpeg-core.js`,   'text/javascript'),
+      wasmURL:   await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+      workerURL: await toBlobURL(`${ffBase}/worker.js`,      'text/javascript'),
+    });
+    await new Promise(r => setTimeout(r, 0));
+  }
+  setProgress('ffmpeg', 20, 'Writing file…');
+  await ffmpegInstance.writeFile('input.video', await fetchFile(file));
+  await new Promise(r => setTimeout(r, 0));
+  await ffmpegInstance.exec(['-i','input.video','-vn','-ar','16000','-ac','1','-f','wav','audio.wav']);
+  const wav = await ffmpegInstance.readFile('audio.wav') as Uint8Array;
+  await ffmpegInstance.deleteFile('input.video');
+  await ffmpegInstance.deleteFile('audio.wav');
+  setProgress('ffmpeg', 100, 'Audio extracted.');
+  return wavToFloat32(wav);
+}
+
+// ── Helper: Float32 → WAV Blob ────────────────────────────────────────────────
+function float32ToWav(float32: Float32Array, sampleRate = 16000): Blob {
+  const numSamples = float32.length;
+  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(buffer);
+  
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+  
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // Byte rate
+  view.setUint16(32, 2, true); // Block align
+  view.setUint16(34, 16, true); // 16-bit
+  writeString(36, 'data');
+  view.setUint32(40, numSamples * 2, true);
+  
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    let s = Math.max(-1, Math.min(1, float32[i]));
+    s = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    view.setInt16(offset, s, true);
+    offset += 2;
+  }
+  
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+// ── Stages 2-3: Worker (Whisper + Translation — slow) ─────────────────────────
+let worker: Worker | null = null;
+
+function getWorker(): Worker {
+  if (worker && workerDevice === currentDevice) return worker;
+  if (worker) {
+    worker.terminate();
+    worker = null;
+  }
+  
+  workerDevice = currentDevice;
+  worker = new Worker('/inference.worker.js', { type: 'module' });
+  worker.onmessage = ({ data }) => {
+    switch (data.type) {
+      case 'progress':
+        setProgress(data.stage, data.pct, data.message);
+        break;
+      case 'log': {
+        const msg = data.message as string;
+        console.log(`[pipeline] ${msg}`);
+        // Show chunk_callback events from native chunking
+        const chunkCallback = msg.match(/^Processing chunk \((.+?)\): "(.*)"$/);
+        if (chunkCallback) {
+          const [, timeStr, text] = chunkCallback;
+          chunkLog.classList.remove('hidden');
+          const entry = document.createElement('div');
+          entry.className = 'flex items-start gap-2';
+          entry.innerHTML = `<span class="text-accent shrink-0">\u25b8 ${timeStr}</span><span class="truncate text-text/80">${text || '(silence)'}</span>`;
+          chunkEntries.appendChild(entry);
+          chunkEntries.scrollTop = chunkEntries.scrollHeight;
+        }
+        // Show key lifecycle events
+        if (msg.includes('model loaded') || msg.includes('Whisper finished') || msg.includes('raw segments') || msg.includes('final subtitle segments') || msg.includes('Audio length') || msg.includes('native chunking')) {
+          chunkLog.classList.remove('hidden');
+          const entry = document.createElement('div');
+          entry.className = 'text-success/80';
+          entry.textContent = `\u2713 ${msg}`;
+          chunkEntries.appendChild(entry);
+          chunkEntries.scrollTop = chunkEntries.scrollHeight;
+        }
+        break;
+      }
+      case 'done':
+        currentSRT = data.srt;
+        srtPreview.textContent = currentSRT;
+        progressArea.classList.add('hidden');
+        chunkLog.classList.add('hidden');
+        chunkEntries.innerHTML = '';
+        resultCard.classList.remove('hidden');
+        runBtn.disabled = false;
+        worker?.terminate();
+        worker = null;
+        break;
+      case 'error':
+        showError(data.message);
+        chunkLog.classList.add('hidden');
+        chunkEntries.innerHTML = '';
+        worker?.terminate();
+        worker = null;
+        break;
+    }
+  };
+  worker.onerror = (e) => {
+    showError(e.message ?? 'Worker error');
+    worker?.terminate();
+    worker = null;
+  };
+  return worker;
+}
+
+// ── Run ───────────────────────────────────────────────────────────────────────
+runBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  errorBanner.classList.add('hidden');
+  resultCard.classList.add('hidden');
+  progressArea.classList.remove('hidden');
+  runBtn.disabled = true;
+  rawTranscription = ''; // Clear previous raw transcription
+
+  try {
+    const translatorConfig = getTranslatorConfig();
+    const fromLang = langFrom.value;
+    const toLang = langTo.value;
+    // Parse word replacements from textarea
+    const replacements: Array<{from: string, to: string}> = [];
+    const rawReplacements = wordReplacementsInput.value.trim();
+    if (rawReplacements) {
+      for (const pair of rawReplacements.split(',')) {
+        const parts = pair.split(/→|->/).map(s => s.trim());
+        if (parts.length === 2 && parts[0] && parts[1]) {
+          replacements.push({ from: parts[0], to: parts[1] });
+        }
+      }
+    }
+
+    if (currentDevice === 'cloud') {
+      const url = cloudUrl.value.trim();
+      const key = cloudKey.value.trim();
+      const model = cloudModel.value.trim() || 'whisper-large-v3';
+      if (!url || !key) throw new Error('Cloud API requires both Base URL and API Key.');
+      
+      // Save settings
+      localStorage.setItem('cloudUrl', url);
+      localStorage.setItem('cloudModel', model);
+      if (cloudSaveKey.checked) localStorage.setItem('cloudKey', key);
+      else localStorage.removeItem('cloudKey');
+
+      const pcm = await extractAudio(selectedFile);
+      const chunks: Blob[] = [];
+      const chunkDuration = 60; // 60 seconds — smaller chunks reduce hallucinations
+      const samplesPerChunk = chunkDuration * 16000;
+      
+      for (let i = 0; i < pcm.length; i += samplesPerChunk) {
+        const chunkPcm = pcm.subarray(i, i + samplesPerChunk);
+        chunks.push(float32ToWav(chunkPcm, 16000));
+      }
+
+      const endpoint = '/audio/transcriptions';
+      const fullUrl = url.replace(/\/+$/, '') + endpoint;
+
+      const allSegments = [];
+      const rawLines = []; // For debugging: raw transcription before cleanup
+
+      for (let i = 0; i < chunks.length; i++) {
+        setProgress('whisper', Math.round((i / chunks.length) * 100), `Transcribing chunk ${i + 1} of ${chunks.length}…`);
+        
+        const formData = new FormData();
+        formData.append('file', chunks[i], `chunk_${i}.wav`);
+        formData.append('model', model);
+        formData.append('response_format', 'verbose_json');
+        formData.append('temperature', '0');
+        if (fromLang && fromLang !== 'none') {
+          formData.append('language', fromLang);
+        }
+        
+        const res = await fetchWithRetry(fullUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${key}` },
+          body: formData
+        }, (msg) => {
+          setProgress('whisper', Math.round((i / chunks.length) * 100), msg);
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          let errObj;
+          try { errObj = JSON.parse(errText); } catch(e) {}
+          throw new Error(`Cloud API Error: ${res.status} - ${errObj?.error?.message || errText}`);
+        }
+
+        const data = await res.json();
+        const segments = data.segments || [];
+        const timeOffset = i * chunkDuration;
+        
+        // Log raw transcription for debugging
+        rawLines.push(`=== Chunk ${i + 1} (offset ${timeOffset}s) ===`);
+        for (const seg of segments) {
+          const start = new Date((seg.start + timeOffset) * 1000).toISOString().substr(11, 12).replace('.', ',');
+          const end = new Date((seg.end + timeOffset) * 1000).toISOString().substr(11, 12).replace('.', ',');
+          rawLines.push(`${start} --> ${end}  ${seg.text}`);
+        }
+        rawLines.push('');
+        
+        for (const seg of segments) {
+          allSegments.push({
+            start: seg.start + timeOffset,
+            end: seg.end + timeOffset,
+            text: seg.text
+          });
+        }
+      }
+
+      // Store raw transcription for debugging download
+      rawTranscription = rawLines.join('\n');
+      console.log('=== RAW TRANSCRIPTION ===');
+      console.log(rawTranscription);
+      console.log('=== END RAW TRANSCRIPTION ===');
+
+      // Always run post-processing to clean up Whisper hallucinations, even if not translating
+      setProgress('translate', 0, 'Applying AI cleanup & post-processing…');
+      getWorker().postMessage({
+        type: 'post_process',
+        segments: allSegments,
+        translatorConfig,
+        replacements,
+        device: webgpuAvailable ? 'webgpu' : 'wasm'
+      });
+      return;
+    }
+
+    const pcm = await extractAudio(selectedFile);
+    getWorker().postMessage({
+      pcm: pcm.buffer,
+      whisperModel: whisperSel.value,
+      replacements,
+      translatorConfig,
+      skipTranslation: !translatorConfig,
+      sourceLang: fromLang !== 'none' ? fromLang : '',
+      targetLang: toLang || '',
+      device: currentDevice,
+    }, [pcm.buffer]);
+  } catch (err: any) {
+    showError(err?.message ?? String(err));
+    runBtn.disabled = false;
+  }
+});
+
+downloadBtn.addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([currentSRT], { type: 'text/plain;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'subtitles.srt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Delay revocation heavily to prevent Windows Defender from causing 0-byte downloads
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+});
+
+copyBtn.addEventListener('click', async () => {
+  await navigator.clipboard.writeText(currentSRT);
+  copyBtn.textContent = 'Copied!';
+  setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+});
+
+const downloadRawBtn = document.getElementById('download-raw-btn')!;
+downloadRawBtn.addEventListener('click', () => {
+  if (!rawTranscription) return;
+  const url = URL.createObjectURL(new Blob([rawTranscription], { type: 'text/plain;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'raw_transcription.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Delay revocation heavily to prevent Windows Defender from causing 0-byte downloads
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+});
+</script>
