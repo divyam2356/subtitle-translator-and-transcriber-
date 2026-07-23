@@ -470,7 +470,7 @@ self.onmessage = async ({ data }) => {
     const segments = await transcribe(audio, whisperModel, sourceLang, targetLang, device);
 
     if (segments.length === 0) {
-      post('error', { message: 'No speech detected in the audio. The file may contain only non-speech sounds (music, noise, etc.).' });
+      post('error', { message: 'No speech detected in the audio. The file may contain only non-speech sounds (music, noise, etc.), or the audio quality is too low for Whisper to detect speech. Try a different Whisper model or check that the file has a clear speech track.' });
       return;
     }
 

@@ -317,23 +317,49 @@ async function transcribe(pcmFloat32, model, sourceLang, targetLang, device) {
 
   log(`Initializing pipeline with device: "${device}" and dtype: ${JSON.stringify(dtype)}`);
 
-  const asr = await pipeline('automatic-speech-recognition', model, {
-    device,
-    dtype,
-    progress_callback: ({ status, progress }) => {
-      if (status === 'downloading') {
-        const p = Math.round(progress ?? 0);
-        log(`Downloading Whisper model: ${p}%`);
-        post('progress', { stage: 'whisper', pct: p, message: `Downloading Whisper model… ${p}%` });
-      }
-    },
-  });
+  let asr;
+  try {
+    asr = await pipeline('automatic-speech-recognition', model, {
+      device,
+      dtype,
+      progress_callback: ({ status, progress }) => {
+        if (status === 'downloading') {
+          const p = Math.round(progress ?? 0);
+          log(`Downloading Whisper model: ${p}%`);
+          post('progress', { stage: 'whisper', pct: p, message: `Downloading Whisper model… ${p}%` });
+        }
+      },
+    });
+  } catch (modelErr) {
+    log(`Failed to load model on ${device}: ${modelErr.message}`);
+    // If WebGPU fails, try falling back to WASM
+    if (device === 'webgpu') {
+      log('WebGPU model load failed — retrying with WASM/CPU…');
+      post('progress', { stage: 'whisper', pct: 0, message: 'GPU failed, falling back to CPU…' });
+      asr = await pipeline('automatic-speech-recognition', model, {
+        device: 'wasm',
+        dtype: 'q8',
+        progress_callback: ({ status, progress }) => {
+          if (status === 'downloading') {
+            const p = Math.round(progress ?? 0);
+            post('progress', { stage: 'whisper', pct: p, message: `Downloading Whisper model… ${p}%` });
+          }
+        },
+      });
+    } else {
+      throw modelErr;
+    }
+  }
 
   log('Whisper model loaded. Starting transcription…');
   post('progress', { stage: 'whisper', pct: 5, message: 'Starting transcription…' });
 
   const totalSeconds = pcmFloat32.length / SAMPLE_RATE;
   log(`Audio length: ${totalSeconds.toFixed(1)}s (${pcmFloat32.length} samples)`);
+
+  if (pcmFloat32.length < SAMPLE_RATE) {
+    throw new Error('Audio is too short (less than 1 second). Please upload a longer file.');
+  }
 
   // Build Whisper options with native chunking and stride
   const whisperOpts = {
@@ -393,6 +419,17 @@ async function transcribe(pcmFloat32, model, sourceLang, targetLang, device) {
     .filter(s => s.text.length > 0);
 
   log(`Whisper finished in ${transcribeElapsed}s — ${rawSegments.length} raw segments extracted`);
+  
+  if (rawSegments.length === 0) {
+    log(`Result object keys: ${Object.keys(result)}`);
+    log(`Result text: "${(result.text ?? '').slice(0, 200)}"`);
+    log(`Result chunks count: ${(result.chunks ?? []).length}`);
+    // If result has text but no chunks, it might be a model output format issue
+    if (result.text && result.text.trim().length > 0) {
+      log('Whisper returned text but no timestamped chunks — using full text as single segment');
+      rawSegments.push({ start: 0, end: totalSeconds, text: result.text.trim() });
+    }
+  }
 
   // Log first 10 raw segments for debugging
   for (let i = 0; i < Math.min(10, rawSegments.length); i++) {
@@ -552,7 +589,9 @@ self.onmessage = async ({ data }) => {
 
     const segments = await transcribe(float32, whisperModel, sourceLang, targetLang, device);
     if (segments.length === 0) {
-      post('error', { message: 'No speech detected in the audio. The file may contain only non-speech sounds (music, noise, etc.).' });
+      log('Transcription returned 0 segments after cleanup');
+      log(`Original raw segments were filtered out by hallucination detection or cleanup`);
+      post('error', { message: 'No speech detected in the audio. The file may contain only non-speech sounds (music, noise, etc.), or the audio quality is too low for Whisper to detect speech. Try a different Whisper model or check that the file has a clear speech track.' });
       return;
     }
 
