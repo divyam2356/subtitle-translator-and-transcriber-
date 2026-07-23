@@ -70,7 +70,7 @@ Whisper is known to hallucinate on silent segments (repeating "Thank you for wat
 Fix consistently mistranscribed words post-generation. Enter corrections in the textarea using `→` or `->` as separator:
 
 ```
-coming → cumming, hold me → fuck me
+probly → probably, gonna → going to
 ```
 
 Corrections are applied via regex (case-insensitive) across all subtitle segments.
